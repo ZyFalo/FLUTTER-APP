@@ -6,10 +6,47 @@ on:
       - 'v*' # Se activa cuando creas una versión como v1.0
 
 jobs:
-  build:
-    name: Compilando para Android y Windows
-    runs-on: windows-latest
+  build-android:
+    name: Build Android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
 
+      - uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Instalar dependencias
+        run: flutter pub get
+
+      - name: Build APK
+        run: flutter build apk --release
+
+      - name: Verificar APK generado
+        run: |
+          if [ ! -f "build/app/outputs/flutter-apk/app-release.apk" ]; then
+            echo "Error: APK no fue generado"
+            exit 1
+          fi
+          ls -lh build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Renombrar APK
+        run: cp build/app/outputs/flutter-apk/app-release.apk myapp-android.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v3
+        with:
+          name: android-apk
+          path: myapp-android.apk
+
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v3
 
@@ -17,35 +54,102 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: Build Android
-        run: flutter build apk --release
+      - name: Instalar dependencias
+        run: flutter pub get
 
       - name: Build Windows
-        run: |
-          flutter config --enable-windows-desktop
-          flutter build windows --release
+        run: flutter build windows --release
 
-      - name: Verificar archivos generados
-        run: |
-          echo "=== Verificando APK ==="
-          dir build\app\outputs\flutter-apk\
-          echo "=== Verificando Windows build ==="
-          dir build\windows\runner\Release\
-
-      - name: Comprimir archivos de Windows
+      - name: Verificar build de Windows
         shell: powershell
         run: |
-          Compress-Archive -Path build\windows\runner\Release\* -DestinationPath myapp-windows.zip
+          if (Test-Path "build\windows\x64\runner\Release") {
+            Write-Host "Usando ruta: build\windows\x64\runner\Release"
+            Get-ChildItem build\windows\x64\runner\Release
+          } elseif (Test-Path "build\windows\runner\Release") {
+            Write-Host "Usando ruta: build\windows\runner\Release"
+            Get-ChildItem build\windows\runner\Release
+          } else {
+            Write-Host "Error: No se encontro la carpeta de release"
+            exit 1
+          }
 
-      - name: Renombrar APK
+      - name: Comprimir Windows
+        shell: powershell
         run: |
-          copy build\app\outputs\flutter-apk\app-release.apk myapp-android.apk
+          if (Test-Path "build\windows\x64\runner\Release") {
+            Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath myapp-windows.zip
+          } else {
+            Compress-Archive -Path build\windows\runner\Release\* -DestinationPath myapp-windows.zip
+          }
 
+      - name: Upload Windows
+        uses: actions/upload-artifact@v3
+        with:
+          name: windows-zip
+          path: myapp-windows.zip
+
+  build-macos:
+    name: Build macOS (Apple Silicon)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Instalar dependencias
+        run: flutter pub get
+
+      - name: Build macOS
+        run: flutter build macos --release
+
+      - name: Verificar build de macOS
+        run: |
+          if [ ! -d "build/macos/Build/Products/Release/myapp.app" ]; then
+            echo "Error: App de macOS no fue generada"
+            ls -la build/macos/Build/Products/Release/
+            exit 1
+          fi
+          echo "App generada correctamente:"
+          ls -lh build/macos/Build/Products/Release/
+
+      - name: Comprimir macOS
+        run: |
+          cd build/macos/Build/Products/Release
+          zip -r myapp-macos.zip myapp.app
+          mv myapp-macos.zip ../../../../../
+
+      - name: Upload macOS
+        uses: actions/upload-artifact@v3
+        with:
+          name: macos-zip
+          path: myapp-macos.zip
+
+  release:
+    name: Crear Release
+    needs: [build-android, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Android
+        uses: actions/download-artifact@v3
+        with:
+          name: android-apk
+      - name: Download Windows
+        uses: actions/download-artifact@v3
+        with:
+          name: windows-zip
+      - name: Download macOS
+        uses: actions/download-artifact@v3
+        with:
+          name: macos-zip
       - name: Crear Release y Subir Archivos
         uses: softprops/action-gh-release@v1
         with:
           files: |
             myapp-android.apk
             myapp-windows.zip
+            myapp-macos.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
