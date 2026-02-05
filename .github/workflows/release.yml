@@ -25,11 +25,27 @@ jobs:
           flutter config --enable-windows-desktop
           flutter build windows --release
 
+      - name: Verificar archivos generados
+        run: |
+          echo "=== Verificando APK ==="
+          dir build\app\outputs\flutter-apk\
+          echo "=== Verificando Windows build ==="
+          dir build\windows\runner\Release\
+
+      - name: Comprimir archivos de Windows
+        shell: powershell
+        run: |
+          Compress-Archive -Path build\windows\runner\Release\* -DestinationPath myapp-windows.zip
+
+      - name: Renombrar APK
+        run: |
+          copy build\app\outputs\flutter-apk\app-release.apk myapp-android.apk
+
       - name: Crear Release y Subir Archivos
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            build/app/outputs/flutter-apk/app-release.apk
-            build/windows/x64/runner/Release/myapp.exe
+            myapp-android.apk
+            myapp-windows.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
